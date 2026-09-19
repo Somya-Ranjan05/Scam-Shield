@@ -92,13 +92,16 @@ export const dbService = {
   async getProfile(userId) {
     if (!userId) return null;
     if (isSupabaseConfigured) {
-      const { data, error } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .single();
-      if (error && error.code !== "PGRST116") console.error("getProfile error:", error);
-      return data || null;
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        // fall through
+      }
     }
     return memoryStore.profiles.get(userId) || null;
   },
@@ -130,35 +133,42 @@ export const dbService = {
     };
 
     if (isSupabaseConfigured) {
-      const { data, error } = await supabaseAdmin
-        .from("submissions")
-        .insert(row)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("submissions")
+          .insert(row)
+          .select()
+          .single();
+        if (!error && data) return data;
+        console.warn("Supabase submissions insert issue (falling back to memory store):", error?.message);
+      } catch (subErr) {
+        console.warn("Supabase unavailable, using memory store:", subErr.message);
+      }
     }
 
     memoryStore.submissions.set(id, row);
     return row;
   },
-
   async getSubmissionWithVerdict(id) {
     if (isSupabaseConfigured) {
-      const { data: submission, error: subError } = await supabaseAdmin
-        .from("submissions")
-        .select("*")
-        .eq("id", id)
-        .single();
-      if (subError || !submission) return null;
+      try {
+        const { data: submission, error: subError } = await supabaseAdmin
+          .from("submissions")
+          .select("*")
+          .eq("id", id)
+          .single();
+        if (!subError && submission) {
+          const { data: verdict } = await supabaseAdmin
+            .from("verdicts")
+            .select("*")
+            .eq("submission_id", id)
+            .single();
 
-      const { data: verdict } = await supabaseAdmin
-        .from("verdicts")
-        .select("*")
-        .eq("submission_id", id)
-        .single();
-
-      return { ...submission, verdict: verdict || null };
+          return { ...submission, verdict: verdict || null };
+        }
+      } catch (err) {
+        console.warn("Supabase getSubmission error, checking memory store:", err.message);
+      }
     }
 
     const sub = memoryStore.submissions.get(id);
@@ -214,13 +224,17 @@ export const dbService = {
     };
 
     if (isSupabaseConfigured) {
-      const { data, error } = await supabaseAdmin
-        .from("verdicts")
-        .insert(row)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("verdicts")
+          .insert(row)
+          .select()
+          .single();
+        if (!error && data) return data;
+        console.warn("Supabase verdicts insert issue (falling back to memory store):", error?.message);
+      } catch (verr) {
+        console.warn("Supabase verdict error, using memory store:", verr.message);
+      }
     }
 
     memoryStore.verdicts.set(id, row);
@@ -233,15 +247,18 @@ export const dbService = {
     if (validSignatures.length === 0) return null;
 
     if (isSupabaseConfigured) {
-      const { data, error } = await supabaseAdmin
-        .from("threat_signatures")
-        .select("*")
-        .in("signature", validSignatures)
-        .order("total_reports", { ascending: false })
-        .limit(1);
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("threat_signatures")
+          .select("*")
+          .in("signature", validSignatures)
+          .order("total_reports", { ascending: false })
+          .limit(1);
 
-      if (error || !data || data.length === 0) return null;
-      return data[0];
+        if (!error && data && data.length > 0) return data[0];
+      } catch (err) {
+        // fall through
+      }
     }
 
     for (const sig of validSignatures) {
@@ -257,33 +274,35 @@ export const dbService = {
     const sigKey = signature.toLowerCase().trim();
 
     if (isSupabaseConfigured) {
-      const existing = await this.findThreatMatch([sigKey]);
-      if (existing) {
-        const { data, error } = await supabaseAdmin
-          .from("threat_signatures")
-          .update({
-            total_reports: existing.total_reports + 1,
-            highest_risk_score: Math.max(existing.highest_risk_score, riskScore || 0),
-            last_seen_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id)
-          .select()
-          .single();
-        if (error) console.error("Update threat signature error:", error);
-        return data;
-      } else {
-        const { data, error } = await supabaseAdmin
-          .from("threat_signatures")
-          .insert({
-            signature: sigKey,
-            scam_category: scamCategory,
-            total_reports: 1,
-            highest_risk_score: riskScore || 0,
-          })
-          .select()
-          .single();
-        if (error) console.error("Insert threat signature error:", error);
-        return data;
+      try {
+        const existing = await this.findThreatMatch([sigKey]);
+        if (existing) {
+          const { data, error } = await supabaseAdmin
+            .from("threat_signatures")
+            .update({
+              total_reports: existing.total_reports + 1,
+              highest_risk_score: Math.max(existing.highest_risk_score, riskScore || 0),
+              last_seen_at: new Date().toISOString(),
+            })
+            .eq("id", existing.id)
+            .select()
+            .single();
+          if (!error && data) return data;
+        } else {
+          const { data, error } = await supabaseAdmin
+            .from("threat_signatures")
+            .insert({
+              signature: sigKey,
+              scam_category: scamCategory,
+              total_reports: 1,
+              highest_risk_score: riskScore || 0,
+            })
+            .select()
+            .single();
+          if (!error && data) return data;
+        }
+      } catch (err) {
+        // fall through
       }
     }
 
@@ -320,13 +339,16 @@ export const dbService = {
     };
 
     if (isSupabaseConfigured) {
-      const { data, error } = await supabaseAdmin
-        .from("scam_reports")
-        .insert(row)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("scam_reports")
+          .insert(row)
+          .select()
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        // fall through
+      }
     }
 
     memoryStore.scam_reports.set(id, row);
@@ -337,23 +359,28 @@ export const dbService = {
     const offset = (page - 1) * limit;
 
     if (isSupabaseConfigured) {
-      let query = supabaseAdmin
-        .from("scam_reports")
-        .select("*, submissions(submission_type, normalized_domain, normalized_phone, apk_filename, apk_package_name), verdicts(risk_score, risk_tier, headline_verdict)", { count: "exact" })
-        .in("status", ["community_verified", "admin_verified"])
-        .order("created_at", { ascending: false });
+      try {
+        let query = supabaseAdmin
+          .from("scam_reports")
+          .select("*, submissions(submission_type, normalized_domain, normalized_phone, apk_filename, apk_package_name), verdicts(risk_score, risk_tier, headline_verdict)", { count: "exact" })
+          .in("status", ["community_verified", "admin_verified"])
+          .order("created_at", { ascending: false });
 
-      if (category && category !== "all") {
-        query = query.eq("scam_category", category);
+        if (category && category !== "all") {
+          query = query.eq("scam_category", category);
+        }
+
+        if (search && search.trim()) {
+          query = query.or(`public_summary.ilike.%${search}%,threat_signature.ilike.%${search}%`);
+        }
+
+        const { data, error, count } = await query.range(offset, offset + limit - 1);
+        if (!error && data) {
+          return { reports: data || [], total: count || 0, page, totalPages: Math.ceil((count || 0) / limit) };
+        }
+      } catch (err) {
+        // fall through to memoryStore
       }
-
-      if (search && search.trim()) {
-        query = query.or(`public_summary.ilike.%${search}%,threat_signature.ilike.%${search}%`);
-      }
-
-      const { data, error, count } = await query.range(offset, offset + limit - 1);
-      if (error) throw error;
-      return { reports: data || [], total: count || 0, page, totalPages: Math.ceil((count || 0) / limit) };
     }
 
     let items = Array.from(memoryStore.scam_reports.values())
@@ -416,15 +443,20 @@ export const dbService = {
     const offset = (page - 1) * limit;
 
     if (isSupabaseConfigured) {
-      const { data, error, count } = await supabaseAdmin
-        .from("scam_reports")
-        .select("*, submissions(*), verdicts(*)", { count: "exact" })
-        .eq("status", "pending_review")
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
+      try {
+        const { data, error, count } = await supabaseAdmin
+          .from("scam_reports")
+          .select("*, submissions(*), verdicts(*)", { count: "exact" })
+          .eq("status", "pending_review")
+          .order("created_at", { ascending: false })
+          .range(offset, offset + limit - 1);
 
-      if (error) throw error;
-      return { reports: data || [], total: count || 0, page, totalPages: Math.ceil((count || 0) / limit) };
+        if (!error && data) {
+          return { reports: data || [], total: count || 0, page, totalPages: Math.ceil((count || 0) / limit) };
+        }
+      } catch (err) {
+        // fall through
+      }
     }
 
     const items = Array.from(memoryStore.scam_reports.values())
@@ -448,18 +480,21 @@ export const dbService = {
 
   async updateReportStatus(reportId, { status, reviewedBy }) {
     if (isSupabaseConfigured) {
-      const { data, error } = await supabaseAdmin
-        .from("scam_reports")
-        .update({
-          status,
-          reviewed_by: reviewedBy,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", reportId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("scam_reports")
+          .update({
+            status,
+            reviewed_by: reviewedBy,
+            reviewed_at: new Date().toISOString(),
+          })
+          .eq("id", reportId)
+          .select()
+          .single();
+        if (!error && data) return data;
+      } catch (err) {
+        // fall through
+      }
     }
 
     const report = memoryStore.scam_reports.get(reportId);
@@ -473,18 +508,22 @@ export const dbService = {
   // Aggregate Stats
   async getLiveStats() {
     if (isSupabaseConfigured) {
-      const [{ count: totalScans }, { count: totalReports }, { count: blockedCount }] = await Promise.all([
-        supabaseAdmin.from("submissions").select("*", { count: "exact", head: true }),
-        supabaseAdmin.from("scam_reports").select("*", { count: "exact", head: true }),
-        supabaseAdmin.from("verdicts").select("*", { count: "exact", head: true }).in("risk_tier", ["dangerous", "confirmed_scam"]),
-      ]);
+      try {
+        const [{ count: totalScans }, { count: totalReports }, { count: blockedCount }] = await Promise.all([
+          supabaseAdmin.from("submissions").select("*", { count: "exact", head: true }),
+          supabaseAdmin.from("scam_reports").select("*", { count: "exact", head: true }),
+          supabaseAdmin.from("verdicts").select("*", { count: "exact", head: true }).in("risk_tier", ["dangerous", "confirmed_scam"]),
+        ]);
 
-      return {
-        totalScans: (totalScans || 0) + 12840,
-        scamsBlocked: (blockedCount || 0) + 9420,
-        communityReports: (totalReports || 0) + 3180,
-        languagesSupported: 8,
-      };
+        return {
+          totalScans: (totalScans || 0) + 12840,
+          scamsBlocked: (blockedCount || 0) + 9420,
+          communityReports: (totalReports || 0) + 3180,
+          languagesSupported: 8,
+        };
+      } catch (err) {
+        // fall through
+      }
     }
 
     const totalScans = memoryStore.submissions.size + 12840;

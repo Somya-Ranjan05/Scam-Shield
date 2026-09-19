@@ -22,24 +22,30 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-const allowedOrigins = [
-  process.env.CORS_ORIGIN || "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:3000",
-  "http://127.0.0.1:5173"
-];
-
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, curl) or allowed origins
-    if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== "production") {
-      callback(null, true);
-    } else {
-      callback(new Error("CORS policy violation: Origin not allowed"));
+    // Allow requests with no origin (e.g. server-to-server, mobile, curl)
+    if (!origin) return callback(null, true);
+
+    // Allow all vercel.app deployments (including preview URLs), localhost, or custom domain
+    if (
+      origin.endsWith(".vercel.app") ||
+      origin.includes("localhost") ||
+      origin.includes("127.0.0.1") ||
+      (process.env.CORS_ORIGIN && (origin === process.env.CORS_ORIGIN || process.env.CORS_ORIGIN === "*"))
+    ) {
+      return callback(null, true);
     }
+
+    // Reflect origin for permissive browser access in production
+    return callback(null, true);
   },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 }));
+
+app.options("*", cors());
 
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));

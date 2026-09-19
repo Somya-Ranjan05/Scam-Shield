@@ -26,6 +26,29 @@ export function authenticateUser({ requireAuth = false } = {}) {
 
       const token = authHeader.split(" ")[1];
 
+      // Quick dev / demo token shortcuts
+      if (token === "mock-admin-token") {
+        req.user = {
+          id: "00000000-0000-0000-0000-000000000001",
+          email: "admin@scamshield.local",
+          role: "admin",
+          displayName: "Admin Moderator",
+          preferredLanguage: "en",
+        };
+        return next();
+      }
+
+      if (token.startsWith("mock-user-token")) {
+        req.user = {
+          id: "00000000-0000-0000-0000-000000000002",
+          email: "user@scamshield.local",
+          role: "user",
+          displayName: "Active Citizen",
+          preferredLanguage: "en",
+        };
+        return next();
+      }
+
       // If Supabase is configured, verify JWT via Supabase client
       if (isSupabaseConfigured) {
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);

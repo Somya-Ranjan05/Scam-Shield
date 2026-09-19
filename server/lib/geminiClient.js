@@ -4,9 +4,9 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export const MODELS = {
-  FAST_ANALYSIS: "gemini-2.5-flash",
-  DEEP_ANALYSIS: "gemini-2.5-pro",
-  AUDIO_TRANSCRIPTION: "gemini-2.5-flash",
+  FAST_ANALYSIS: "gemini-2.0-flash",
+  DEEP_ANALYSIS: "gemini-1.5-pro",
+  AUDIO_TRANSCRIPTION: "gemini-2.0-flash",
 };
 
 let genAIInstance = null;
